@@ -1,0 +1,19 @@
+{
+  "scripts": {
+    "dfx_install": "DFX_VERSION=0.15.1 sh -ci \"$(curl -fsSL https://sdk.dfinity.org/install.sh)\"",
+    "replica_start": "dfx start --background",
+    "replica_stop": "dfx stop",
+    "canister_deploy_local": "dfx deploy ipcns",
+    "canister_deploy_mainnet": "dfx deploy --network ic ipcns",
+    "canister_uninstall": "dfx canister uninstall-code ipcns"
+  },
+  "dependencies": {
+    "azle": "0.19.0"
+  },
+  "engines": {
+    "node": "18"
+  },
+  "devDependencies": {
+    "js-sha256": "^0.11.0"
+  }
+}
