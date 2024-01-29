@@ -6,6 +6,12 @@ const DomainPayload = Record({
     duration: nat64,
 });
 
+const ReserveDomainPayload = Record({
+    name: text,
+    extension: text,
+    wallet: Principal,
+});
+
 const Domain = Record({
     id: text,
     owner: Principal,
@@ -15,8 +21,7 @@ const Domain = Record({
 type Domain = typeof Domain.tsType;
 
 const History = Record({
-    previousOwner: Principal,
-    newOnwer: Principal,
+    owner: Principal,
     validUntil: nat64,
     createdAt: nat64,
 });
@@ -25,9 +30,11 @@ type History = typeof History.tsType;
 
 const Error = Variant({
     CallerNotCanisterOwner: Principal,
-    CallerNotDomainOnwer: Principal,
+    CallerNotDomainOwner: Principal,
     DomainNotFound: text,
+    DomainStillValid: Principal,
     DomainAlreadyClaimed: Principal,
+    DomainOwnershipExpired: Principal,
     InvalidDuration: nat64,
     InvalidDomainNameLength: nat8,
     InvalidDomainExtension: text,
@@ -35,13 +42,13 @@ const Error = Variant({
     UnknownError: text,
 });
 
-const KNOWN_EXTENSIONS: text[] = ["icp", "ic", "moon"];
-const MIN_DOMAIN_NAME_LENGTH: nat8 = 3;
-const MAX_DOMAIN_NAME_LENGTH: nat8 = 40;
+const SUPPORTED_EXTENSIONS: text[] = ["icp", "ic", "moon"]; // Extensions that are supported by the service
+const MIN_DOMAIN_NAME_LENGTH: nat8 = 3; // Minimum length of the domain name
+const MAX_DOMAIN_NAME_LENGTH: nat8 = 40; // Maximum length of the domain name
 const MIN_DURATION: nat64 = 1_000_000n; // 1 second in nanoseconds
 const MAX_DURATION: nat64 = 31_536_000_000_000_000n; // 1 year in nanoseconds
 
-let owner: Principal = Principal.anonymous();
+let owner: Principal; // Owner of the canister
 
 const domainsStorage = StableBTreeMap<text,Domain>(0);
 const domainHistoryStorage = StableBTreeMap<text,Vec<History>>(1);
@@ -56,24 +63,36 @@ export default Canister({
     /**
      * Reserves a domain for a specific wallet.
      * Callable only by the owner of the canister.
-     * @param domainKey Domain to reserve
-     * @param wallet Wallet to reserve the domain for
+     * @param payload Payload with a data required to reserve a domain
      * @returns The reserved domain
      */
-    reserve: update([text, Principal], Result(text, Error), (domainKey, wallet) => {
+    reserve: update([ReserveDomainPayload], Result(text, Error), (payload) => {
         // If caller is not the owner of the canister, he cannot reserve a domain
-        if (owner != ic.caller()) {
+        if (owner.toText() !== ic.caller().toText()) {
             return Result.Err({ CallerNotCanisterOwner: ic.caller() });
         }
 
+        // If domain name is not in the correct length range, revert
+        if (payload.name.length < MIN_DOMAIN_NAME_LENGTH || payload.name.length > MAX_DOMAIN_NAME_LENGTH) {
+            return Result.Err({ InvalidDomainNameLength: payload.name.length });
+        }
+        
+        // If domain extension is not known, revert
+        if (!SUPPORTED_EXTENSIONS.includes(payload.extension)) {
+            return Result.Err({ InvalidDomainExtension: payload.extension });
+        }
+
+        const domainKey = getDomainKey(payload.name, payload.extension);
         // If domain is already claimed, it cannot be reserved
         if (domainsStorage.containsKey(domainKey)) {
             const domain = domainsStorage.get(domainKey);
-            return Result.Err({ DomainAlreadyClaimed: domain.Some!.owner });
+            if (domain.Some) {
+                return Result.Err({ DomainAlreadyClaimed: domain.Some.owner });
+            }
         }
 
         // Set the domain as reserved for a specific wallet
-        reservedDomainsStorage.insert(domainKey, wallet);
+        reservedDomainsStorage.insert(domainKey, payload.wallet);
         return Result.Ok(domainKey);
     }),
 
@@ -92,11 +111,11 @@ export default Canister({
 
             // If domain name is not in the correct length range, revert
             if (payload.name.length < MIN_DOMAIN_NAME_LENGTH || payload.name.length > MAX_DOMAIN_NAME_LENGTH) {
-            return Result.Err({ InvalidDomainNameLength: payload.name.length });
+                return Result.Err({ InvalidDomainNameLength: payload.name.length });
             }
             
             // If domain extension is not known, revert
-            if (!KNOWN_EXTENSIONS.includes(payload.extension)) {
+            if (!SUPPORTED_EXTENSIONS.includes(payload.extension)) {
                 return Result.Err({ InvalidDomainExtension: payload.extension });
             }
 
@@ -107,7 +126,7 @@ export default Canister({
                 const domain = domainsStorage.get(domainKey);
                 // If domain ownership has not expired yet, revert
                 // Else allow the claim of the domain
-                if (domain.Some && domain.Some.validUntil > ic.time()) {
+                if (domain.Some && domain.Some.validUntil >= ic.time()) {
                     return Result.Err({ DomainAlreadyClaimed: domain.Some.owner });
                 }
             }
@@ -116,7 +135,7 @@ export default Canister({
             if (reservedDomainsStorage.containsKey(domainKey)) {
                 const principal = reservedDomainsStorage.get(domainKey);
                 // If domain is reserved for another wallet, revert
-                if (principal.Some && principal.Some != ic.caller()) {
+                if (principal.Some && principal.Some.toText() !== ic.caller().toText()) {
                     return Result.Err({ DomainReserved: principal.Some });
                 }
                 // If domain is reserved for the caller, remove the reservation
@@ -132,7 +151,7 @@ export default Canister({
             };
 
             // Update domain history
-            updateHistoryRecord(domainKey, Principal.anonymous(), ic.caller(), newDomain.validUntil);
+            updateHistoryRecord(domainKey, ic.caller(), newDomain.validUntil);
             // Add domain
             domainsStorage.insert(domainKey, newDomain);
             return Result.Ok(domainKey);
@@ -143,28 +162,32 @@ export default Canister({
 
     /**
      * Rewokes the ownership of a domain.
-     * Callable only by the owner of the domain.
+     * Callable by anyone.
      * @param domainKey Domain to revoke
      * @returns The revoked domain
      */
     revoke: update([text], Result(text, Error), (domainKey) => {
-        const domainData = domainsStorage.get(domainKey);
-        if (domainData.Some) {
-            // If caller is not the owner of the domain, revert
-            if (domainData.Some.owner != ic.caller()) {
-                return Result.Err({ CallerNotDomainOnwer: ic.caller() })
+        const domain = domainsStorage.get(domainKey);
+        if (domain.Some) {
+            // If caller is the owner of domain, he can revoke at any time, regardless of the expiration date
+            if (domain.Some.owner.toText() !== ic.caller().toText()) {
+                // In case caller is not the owner of the domain, he can revoke only if the domain has expired
+                if (domain.Some.validUntil > ic.time()) {
+                    return Result.Err({ DomainStillValid: domain.Some.owner });
+                }
             }
 
+          
             // Create new domain with a new owner
             const newDomain = {
                 id: domainKey,
-                owner: Principal.anonymous(),
-                validUntil: ic.time(),
+                owner: domain.Some.owner,
+                validUntil: 0n,
                 updatedAt: ic.time(),
             };
             
             // Update domain history
-            updateHistoryRecord(domainKey, ic.caller(), Principal.anonymous(), newDomain.validUntil);
+            updateHistoryRecord(domainKey, ic.caller(), newDomain.validUntil);
             // Add domain
             domainsStorage.insert(domainKey, newDomain);
             return Result.Ok(domainKey);
@@ -184,8 +207,12 @@ export default Canister({
         const domain = domainsStorage.get(domainKey);
         if (domain.Some) {
             // If caller is not the owner of the domain, revert
-            if (domain.Some.owner != ic.caller()) {
-                return Result.Err({ CallerNotDomainOnwer: ic.caller() })
+            if (domain.Some.owner.toText() !== ic.caller().toText()) {
+                return Result.Err({ CallerNotDomainOwner: ic.caller() })
+            }
+
+            if (domain.Some.validUntil < ic.time()) {
+                return Result.Err({ DomainOwnershipExpired: domain.Some.owner });
             }
 
             // Create new domain with a new owner
@@ -196,7 +223,7 @@ export default Canister({
                 updatedAt: ic.time(),
             };
             // Update domain history
-            updateHistoryRecord(domainKey, ic.caller(), newOwner, newDomain.validUntil);
+            updateHistoryRecord(domainKey, newOwner, newDomain.validUntil);
             // Add domain
             domainsStorage.insert(domainKey, newDomain);
             return Result.Ok(domainKey);
@@ -270,6 +297,10 @@ export default Canister({
     getCanisterOwner: query([], Principal, () => {
         return owner;
     }),
+
+    getCaller: query([], Principal, () => {
+        return ic.caller();
+    }),
 });
 
 
@@ -288,15 +319,13 @@ function getDomainKey(name: text, extension: text): text {
 /**
  * Updates the domain history.
  * @param domainKey Domain to update
- * @param prevOwner Previous owner of the domain
- * @param newOwner New owner of the domain
+ * @param owner Owner of the domain
  * @param validUntil Timestamp until the domain is valid
  */
-function updateHistoryRecord(domainKey: text, prevOwner: Principal, newOwner: Principal, validUntil: nat64): Void {
+function updateHistoryRecord(domainKey: text, owner: Principal, validUntil: nat64): Void {
     // Create new history record
     const historyRecord = {
-        previousOwner: prevOwner,
-        newOnwer: newOwner,
+        owner: owner,
         validUntil: validUntil,
         createdAt: ic.time(),
     };
