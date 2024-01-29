@@ -1,4 +1,4 @@
-import {Canister, text, nat64, update, Principal, Record, StableBTreeMap, ic, Result, Vec, init, query, Variant, nat8, Void} from "azle";
+import {Canister, text, nat64, update, Principal, Record, StableBTreeMap, ic, Result, Vec, init, query, Variant, nat8, Void, bool} from "azle";
 
 const DomainPayload = Record({
     name: text,
@@ -56,8 +56,19 @@ const reservedDomainsStorage = StableBTreeMap<text,Principal>(2);
 
 
 export default Canister({
+    /**
+     * Initializes the canister and Sets the owner of the canister.
+     */
     init: init([], () => {
         owner = ic.caller();
+    }),
+
+    /**
+     * Returns the owner of the canister.
+     * @returns The canister owner
+     */
+      getCanisterOwner: query([], Principal, () => {
+        return owner;
     }),
 
     /**
@@ -157,6 +168,20 @@ export default Canister({
             return Result.Ok(domainKey);
         } catch (err: any) {
             return Result.Err({ UnknownError: err });
+        }
+    }),
+
+     /**
+     * Returns if the domain is claimable.
+     * @param domainKey Domain to check
+     * @returns Flag if the domain is claimable
+     */
+     getIsClaimable: query([text], Result(bool, Error), (domainKey) => {
+        const domain = domainsStorage.get(domainKey);
+        if (domain.Some) {
+            return Result.Ok(domain.Some.validUntil < ic.time());
+        } else {
+            return Result.Err({ DomainNotFound: domainKey });
         }
     }),
 
@@ -289,22 +314,11 @@ export default Canister({
             return domain.id;
         }));
     }),
-
-    /**
-     * Returns the owner of the canister.
-     * @returns The canister owner
-     */
-    getCanisterOwner: query([], Principal, () => {
-        return owner;
-    }),
-
-    getCaller: query([], Principal, () => {
-        return ic.caller();
-    }),
 });
 
-
+//---------------------------------------------------------------------------------------------
 // Helper functions
+//---------------------------------------------------------------------------------------------
 
 /**
  * Returns the domain key for a specific domain name and extension.
