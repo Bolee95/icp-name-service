@@ -1,4 +1,4 @@
-import {Canister, text, nat64, update, Principal, Record, StableBTreeMap, ic, Result, Vec, init, query, Variant, nat8, Void, bool} from "azle";
+import {Canister, Principal, Variant, Record, StableBTreeMap, Result, Vec, text, nat64, update, ic, init, query, nat8, Void, bool} from "azle";
 
 const DomainPayload = Record({
     name: text,
@@ -42,13 +42,19 @@ const Error = Variant({
     UnknownError: text,
 });
 
-const SUPPORTED_EXTENSIONS: text[] = ["icp", "ic", "moon"]; // Extensions that are supported by the service
-const MIN_DOMAIN_NAME_LENGTH: nat8 = 3; // Minimum length of the domain name
-const MAX_DOMAIN_NAME_LENGTH: nat8 = 40; // Maximum length of the domain name
-const MIN_DURATION: nat64 = 1_000_000n; // 1 second in nanoseconds
-const MAX_DURATION: nat64 = 31_536_000_000_000_000n; // 1 year in nanoseconds
+// Extensions that are supported by the service
+const SUPPORTED_EXTENSIONS: text[] = ["icp", "ic", "moon"];
+// Minimum length of the domain name
+const MIN_DOMAIN_NAME_LENGTH: nat8 = 3; 
+// Maximum length of the domain name
+const MAX_DOMAIN_NAME_LENGTH: nat8 = 40;
+// 1 second in nanoseconds
+const MIN_DURATION: nat64 = 1_000_000n;
+// 1 year in nanoseconds
+const MAX_DURATION: nat64 = 31_536_000_000_000_000n; 
 
-let owner: Principal; // Owner of the canister
+// Owner of the canister
+let owner: Principal; 
 
 const domainsStorage = StableBTreeMap<text,Domain>(0);
 const domainHistoryStorage = StableBTreeMap<text,Vec<History>>(1);
@@ -84,12 +90,12 @@ export default Canister({
         }
 
         // If domain name is not in the correct length range, revert
-        if (payload.name.length < MIN_DOMAIN_NAME_LENGTH || payload.name.length > MAX_DOMAIN_NAME_LENGTH) {
+        if (!isDomainNameValid(payload.name)) {
             return Result.Err({ InvalidDomainNameLength: payload.name.length });
         }
         
         // If domain extension is not known, revert
-        if (!SUPPORTED_EXTENSIONS.includes(payload.extension)) {
+        if (!isDomainExtensionValid(payload.extension)) {
             return Result.Err({ InvalidDomainExtension: payload.extension });
         }
 
@@ -121,12 +127,12 @@ export default Canister({
             }
 
             // If domain name is not in the correct length range, revert
-            if (payload.name.length < MIN_DOMAIN_NAME_LENGTH || payload.name.length > MAX_DOMAIN_NAME_LENGTH) {
+            if (!isDomainNameValid(payload.name)) {
                 return Result.Err({ InvalidDomainNameLength: payload.name.length });
             }
             
             // If domain extension is not known, revert
-            if (!SUPPORTED_EXTENSIONS.includes(payload.extension)) {
+            if (!isDomainExtensionValid(payload.extension)) {
                 return Result.Err({ InvalidDomainExtension: payload.extension });
             }
 
@@ -307,7 +313,7 @@ export default Canister({
     reverseLookup: query([Principal], Result(Vec(text), text), (user) => {
         const domains = domainsStorage.values();
         const userDomains = domains.filter((domain) => {
-            return domain.owner === user;
+            return domain.owner.toText() === user.toText();
         });
 
         return Result.Ok(userDomains.map((domain) => {
@@ -316,9 +322,23 @@ export default Canister({
     }),
 });
 
-//---------------------------------------------------------------------------------------------
-// Helper functions
-//---------------------------------------------------------------------------------------------
+/**
+ * Returns if the domain name is valid.
+ * @param name Domain name
+ * @returns Flag if the domain name is valid
+ */
+function isDomainNameValid(name: text): bool {
+    return name.length >= MIN_DOMAIN_NAME_LENGTH && name.length <= MAX_DOMAIN_NAME_LENGTH;
+}
+
+/**
+ * Returns if the domain extension is valid.
+ * @param extension Domain extension
+ * @returns Flag if the domain extension is valid
+ */
+function isDomainExtensionValid(extension: text): bool {
+    return SUPPORTED_EXTENSIONS.includes(extension);
+}
 
 /**
  * Returns the domain key for a specific domain name and extension.

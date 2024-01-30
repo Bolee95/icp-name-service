@@ -1,11 +1,11 @@
 {
   "canisters": {
-    "ipcns": {
+    "icpns": {
       "type": "custom",
       "main": "src/index.ts",
       "candid": "src/index.did",
-      "build": "npx azle ipcns",
-      "wasm": ".azle/ipcns/ipcns.wasm",
+      "build": "npx azle icpns",
+      "wasm": ".azle/icpns/icpns.wasm",
       "gzip": true
     }
   }
