@@ -183,6 +183,10 @@ export default Canister({
      * @returns Flag if the domain is claimable
      */
      getIsClaimable: query([text], Result(bool, Error), (domainKey) => {
+        if (!isDomainKeyValid(domainKey)) {
+            return Result.Err({ InvalidDomainKey: domainKey });
+        }
+
         const domain = domainsStorage.get(domainKey);
         if (domain.Some) {
             return Result.Ok(domain.Some.validUntil < ic.time());
@@ -198,6 +202,10 @@ export default Canister({
      * @returns The revoked domain
      */
     revoke: update([text], Result(text, Error), (domainKey) => {
+        if (!isDomainKeyValid(domainKey)) {
+            return Result.Err({ InvalidDomainKey: domainKey });
+        }
+
         const domain = domainsStorage.get(domainKey);
         if (domain.Some) {
             // If caller is the owner of domain, he can revoke at any time, regardless of the expiration date
@@ -208,7 +216,6 @@ export default Canister({
                 }
             }
 
-          
             // Create new domain with a new owner
             const newDomain = {
                 id: domainKey,
@@ -235,6 +242,10 @@ export default Canister({
      * @return The transferred domain
      */
     transfer: update([text, Principal], Result(text, Error), (domainKey, newOwner) => {
+        if (!isDomainKeyValid(domainKey)) {
+            return Result.Err({ InvalidDomainKey: domainKey });
+        }
+
         const domain = domainsStorage.get(domainKey);
         if (domain.Some) {
             // If caller is not the owner of the domain, revert
@@ -260,7 +271,6 @@ export default Canister({
             return Result.Ok(domainKey);
         } else {
             return Result.Err({ DomainNotFound: domainKey });
-        }
     }),
 
     /**
@@ -269,6 +279,10 @@ export default Canister({
      * @returns The domain data
      */
     getDomain: query([text], Result(Domain, Error), (domainKey) => {
+        if (!isDomainKeyValid(domainKey)) {
+            return Result.Err({ InvalidDomainKey: domainKey });
+        }
+
         const domain = domainsStorage.get(domainKey);
         if (domain.Some) {
             return Result.Ok(domain.Some);
@@ -283,6 +297,10 @@ export default Canister({
      * @returns The domain history
      */
     getDomainHistory: query([text], Result(Vec(History), Error), (domainKey) => {
+        if (!isDomainKeyValid(domainKey)) {
+            return Result.Err({ InvalidDomainKey: domainKey });
+        }
+
         const domainHistory = domainHistoryStorage.get(domainKey);
         if (domainHistory.Some) {
             return Result.Ok(domainHistory.Some);
@@ -297,6 +315,10 @@ export default Canister({
      * @returns The domain owner
      */
     lookup: query([text], Result(Principal, Error), (domainKey) => {
+        if (!isDomainKeyValid(domainKey)) {
+            return Result.Err({ InvalidDomainKey: domainKey });
+        }
+
         const domain = domainsStorage.get(domainKey);
         if (domain.Some) {
             return Result.Ok(domain.Some.owner);
@@ -348,6 +370,16 @@ function isDomainExtensionValid(extension: text): bool {
  */
 function getDomainKey(name: text, extension: text): text {
     return `${name}.${extension}`;
+}
+
+/**
+ * Returns if the domain key is valid.
+ * @param domainKey Domain key
+ * @returns Flag if the domain key is valid
+ */
+function isDomainKeyValid(domainKey: text): bool {
+    const [name, extension] = domainKey.split(".");
+    return isDomainNameValid(name) && isDomainExtensionValid(extension);
 }
 
 /**
