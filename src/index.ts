@@ -32,6 +32,7 @@ const Error = Variant({
     CallerNotCanisterOwner: Principal,
     CallerNotDomainOwner: Principal,
     DomainNotFound: text,
+    InvalidDomainKey: text,
     DomainStillValid: Principal,
     DomainAlreadyClaimed: Principal,
     DomainOwnershipExpired: Principal,
@@ -253,6 +254,7 @@ export default Canister({
                 return Result.Err({ CallerNotDomainOwner: ic.caller() })
             }
 
+            // If domain ownership has not expired yet, revert
             if (domain.Some.validUntil < ic.time()) {
                 return Result.Err({ DomainOwnershipExpired: domain.Some.owner });
             }
@@ -271,6 +273,7 @@ export default Canister({
             return Result.Ok(domainKey);
         } else {
             return Result.Err({ DomainNotFound: domainKey });
+        }
     }),
 
     /**
@@ -328,19 +331,17 @@ export default Canister({
     }),
 
     /**
-     * Returns the domain key for a specific user.
+     * Returns the domains owned by a user.
      * @param user User to get the domains for
-     * @returns The domain keys owned by the user
+     * @returns The domains owned by the user
      */
-    reverseLookup: query([Principal], Result(Vec(text), text), (user) => {
+    reverseLookup: query([Principal], Result(Vec(Domain), Error), (user) => {
         const domains = domainsStorage.values();
         const userDomains = domains.filter((domain) => {
             return domain.owner.toText() === user.toText();
         });
 
-        return Result.Ok(userDomains.map((domain) => {
-            return domain.id;
-        }));
+        return Result.Ok(userDomains);
     }),
 });
 
