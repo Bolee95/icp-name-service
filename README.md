@@ -35,6 +35,12 @@ You are sure you done it correctly if you run and see a proper version:
 node --version
 ```
 
+The following commands will install the required dependencies and build the project:
+
+```bash
+npm ci
+```
+
 In order to deploy the canister locally, we need `dfx`, which can be installed as a dependency of the project:
 
 ```bash
@@ -47,7 +53,7 @@ Next, you want to start the local replica of ICP network:
 npm run replica_start
 ```
 
-The next step is to create identities for the owner and the user of the canister. You can do that by running:
+The next step is to create identities for the `owner` and the `user` of the canister. You can do that by running:
 
 ```bash
 npm run create_identities
